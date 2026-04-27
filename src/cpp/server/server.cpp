@@ -12,6 +12,7 @@
 #include "lemon/runtime_config.h"
 #include "lemon/system_info.h"
 #include "lemon/version.h"
+#include "lemon/metrics.h"
 #include <iostream>
 #include <iomanip>
 #include <sstream>
@@ -143,6 +144,9 @@ Server::Server(std::shared_ptr<RuntimeConfig> config, const std::string& cache_d
     router_ = std::make_unique<Router>(config_.get(),
                                        model_manager_.get(),
                                        backend_manager_.get());
+
+    // Initialize Prometheus metrics collector
+    MetricsCollector::instance().init();
 
     LOG(DEBUG, "Server") << "Debug logging enabled - subprocess output will be visible" << std::endl;
 
@@ -454,6 +458,13 @@ void Server::setup_routes(httplib::Server &web_server) {
     auto ollama_api = std::make_shared<OllamaApi>(router_.get(), model_manager_.get());
     ollama_api->register_routes(web_server);
 
+
+    // Prometheus metrics endpoint (no auth required)
+    web_server.Get("/metrics", [](const httplib::Request& req, httplib::Response& res) {
+        (void)req;
+        auto metrics = MetricsCollector::instance().export_metrics();
+        res.set_content(metrics, "text/plain; charset=utf-8");
+    });
     // Setup static file serving for web UI
     setup_static_files(web_server);
 }
@@ -1183,6 +1194,9 @@ void Server::auto_load_model_if_needed(const std::string& requested_model) {
     // For FLM models: FastFlowLMServer will handle download internally if needed
     // For non-FLM models: Model should already be cached at this point
     router_->load_model(requested_model, info, RecipeOptions(info.recipe, json::object()), true);
+
+                // Record model load/unload event
+                MetricsCollector::instance().record_model_event(requested_model, info.recipe, true);
     LOG(INFO, "Server") << "Model loaded successfully: " << requested_model << std::endl;
 }
 
@@ -1315,6 +1329,11 @@ void Server::handle_model_by_id(const httplib::Request& req, httplib::Response& 
 
 void Server::handle_chat_completions(const httplib::Request& req, httplib::Response& res) {
     try {
+        // Record request metric
+        MetricsCollector::instance().record_request("POST", req.path, 0);
+
+        // Start timing
+        auto start = std::chrono::steady_clock::now();
         auto request_json = nlohmann::json::parse(req.body);
 
         // Debug: Check if tools are present
@@ -1466,6 +1485,11 @@ void Server::handle_chat_completions(const httplib::Request& req, httplib::Respo
 
                 // Save telemetry to router
                 router_->update_telemetry(input_tokens, output_tokens, ttft_seconds, tps);
+
+                // Record Prometheus metrics
+                std::string model_name = router_->get_loaded_model();
+                MetricsCollector::instance().record_inference_telemetry(
+                    model_name, input_tokens, output_tokens, ttft_seconds, tps);
             } else if (response.contains("usage")) {
                 // OpenAI format uses "usage" field
                 auto usage = response["usage"];
@@ -1499,6 +1523,11 @@ void Server::handle_chat_completions(const httplib::Request& req, httplib::Respo
 
                 // Save telemetry to router
                 router_->update_telemetry(input_tokens, output_tokens, ttft_seconds, tps);
+
+                // Record Prometheus metrics
+                std::string model_name = router_->get_loaded_model();
+                MetricsCollector::instance().record_inference_telemetry(
+                    model_name, input_tokens, output_tokens, ttft_seconds, tps);
             }
 
             // Capture prompt_tokens from usage if available
@@ -1650,6 +1679,11 @@ void Server::handle_completions(const httplib::Request& req, httplib::Response& 
 
                 // Save telemetry to router
                 router_->update_telemetry(input_tokens, output_tokens, ttft_seconds, tps);
+
+                // Record Prometheus metrics
+                std::string model_name = router_->get_loaded_model();
+                MetricsCollector::instance().record_inference_telemetry(
+                    model_name, input_tokens, output_tokens, ttft_seconds, tps);
             } else if (response.contains("usage")) {
                 auto usage = response["usage"];
                 int input_tokens = 0;
@@ -1677,6 +1711,11 @@ void Server::handle_completions(const httplib::Request& req, httplib::Response& 
                     tps = usage["decoding_speed_tps"].get<double>();
                     LOG(INFO, "Telemetry") << "TPS:           " << std::fixed << std::setprecision(2)
                              << tps << std::endl;
+
+                // Record Prometheus metrics
+                std::string model_name = router_->get_loaded_model();
+                MetricsCollector::instance().record_inference_telemetry(
+                    model_name, input_tokens, output_tokens, ttft_seconds, tps);
                 }
                 LOG(INFO, "Telemetry") << "=================" << std::endl;
 
@@ -2838,6 +2877,9 @@ void Server::handle_unload(const httplib::Request& req, httplib::Response& res) 
             } catch (...) {
                 // Ignore parse errors, just unload all
             }
+
+                // Record model unload event
+                MetricsCollector::instance().record_model_event(model_name, "", false);
         }
 
         router_->unload_model(model_name);  // Empty string = unload all

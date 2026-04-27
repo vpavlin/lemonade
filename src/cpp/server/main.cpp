@@ -3,6 +3,10 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include <fstream>
+#include <sstream>
+#include <inttypes.h>
+#include <cstdio>
 #include <lemon/cli_parser.h>
 #include <lemon/config_file.h>
 #include <lemon/logging_config.h>
@@ -10,6 +14,7 @@
 #include <lemon/system_info.h>
 #include <lemon/version.h>
 #include <lemon/utils/path_utils.h>
+#include <lemon/metrics.h>
 #include <lemon/utils/aixlog.hpp>
 
 #ifndef _WIN32
@@ -127,7 +132,108 @@ int main(int argc, char** argv) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(500));
             }
         }).detach();
+
+        // Background thread: periodic system metrics collection (CPU, GPU, memory)
+        std::thread([]() {
+            struct cpu_times {
+                uint64_t user, nice, system, idle, iowait, irq, softirq, steal;
+                uint64_t total() const { return user + nice + system + idle + iowait + irq + softirq + steal; }
+            } prev{}, curr{};
+            
+            // Read initial CPU stats
+            auto read_cpu_stats = [](cpu_times& t) {
+                std::ifstream f("/proc/stat");
+                std::string line;
+                if (std::getline(f, line)) {
+                    std::istringstream iss(line);
+                    std::string label;
+                    iss >> label;
+                    if (label == "cpu") {
+                        iss >> t.user >> t.nice >> t.system >> t.idle >> t.iowait >> t.irq >> t.softirq >> t.steal;
+                    }
+                }
+            };
+            
+            read_cpu_stats(prev);
+            
+            while (!g_shutdown_requested.load()) {
+                std::this_thread::sleep_for(std::chrono::seconds(5));
+                
+                // Read CPU stats again and calculate usage
+                read_cpu_stats(curr);
+                uint64_t total_diff = curr.total() - prev.total();
+                double cpu_percent = 0.0;
+                if (total_diff > 0) {
+                    uint64_t active_diff = (curr.user - prev.user) + (curr.nice - prev.nice) + 
+                                           (curr.system - prev.system) + (curr.irq - prev.irq) + 
+                                           (curr.softirq - prev.softirq) + (curr.steal - prev.steal);
+                    cpu_percent = (static_cast<double>(active_diff) / static_cast<double>(total_diff)) * 100.0;
+                }
+                prev = curr;
+                
+                // Read system memory from /proc/meminfo
+                uint64_t mem_used = 0;
+                {
+                    std::ifstream f("/proc/meminfo");
+                    std::string line;
+                    std::string mem_free, mem_total, buff_cache, buffers;
+                    while (std::getline(f, line)) {
+                        if (line.find("MemTotal:") == 0) mem_total = line;
+                        else if (line.find("MemFree:") == 0) mem_free = line;
+                        else if (line.find("Buffers:") == 0) buffers = line;
+                        else if (line.find("Cached:") == 0 && line.find("SwapCached:") == std::string::npos) buff_cache = line;
+                    }
+                    auto parse_kb = [](const std::string& s) -> uint64_t {
+                        std::istringstream iss(s);
+                        std::string label;
+                        uint64_t val;
+                        iss >> label >> val;
+                        return val * 1024; // kB to bytes
+                    };
+                    if (!mem_total.empty()) {
+                        mem_used = parse_kb(mem_total) - parse_kb(mem_free) - parse_kb(buff_cache) - parse_kb(buffers);
+                    }
+                }
+                
+                // Try to read GPU stats from /sys/class/drm or nvidia-smi
+                double gpu_util = 0.0;
+                uint64_t gpu_mem_used = 0;
+                
+                // Check for NVIDIA GPUs via nvidia-smi
+                std::ifstream smi("/proc/driver/nvidia/gpus/0/memory");
+                if (smi.good()) {
+                    std::string line;
+                    while (std::getline(smi, line)) {
+                        if (line.find("Used:") == 0) {
+                            std::istringstream iss(line);
+                            std::string label;
+                            uint64_t val;
+                            iss >> label >> val;
+                            gpu_mem_used = val * 1024; // Convert from kB to bytes
+                        }
+                    }
+                    smi.close();
+                } else {
+                    // Try nvidia-smi command as fallback
+                    FILE* fp = popen("nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits 2>/dev/null", "r");
+                    if (fp) {
+                        char line[256];
+                        if (fgets(line, sizeof(line), fp)) {
+                            uint64_t gpu_mem_tmp;
+                            sscanf(line, "%lf %" PRIu64, &gpu_util, &gpu_mem_tmp);
+                            gpu_mem_used = gpu_mem_tmp;
+                            gpu_mem_used *= 1024 * 1024; // Convert MB to bytes
+                        }
+                        pclose(fp);
+                    }
+                }
+                
+                auto& collector = MetricsCollector::instance();
+                collector.record_system_resources(cpu_percent, gpu_util, gpu_mem_used, mem_used);
+            }
+        }).detach();
 #endif
+
 
         server.run();
         g_server_instance = nullptr;

@@ -320,6 +320,18 @@ if(NOT USE_SYSTEM_HTTPLIB)
     endif()
 endif()
 
+
+# === prometheus-cpp (for Prometheus metrics) ===
+# Only use the 'core' module which has no CURL dependency
+option(PROMETHEUS_CPP_BUILD_EXAMPLES "Build prometheus-cpp examples" OFF)
+option(ENABLE_PUSH "Build prometheus-cpp push library" OFF)
+option(ENABLE_PULL "Build prometheus-cpp pull library" OFF)
+option(ENABLE_TESTING "Build tests" OFF)
+FetchContent_Declare(prometheus-cpp
+    GIT_REPOSITORY https://github.com/jupp0r/prometheus-cpp.git
+    GIT_TAG v1.2.0
+)
+FetchContent_MakeAvailable(prometheus-cpp)
 # === libwebsockets (for WebSocket support) ===
 if(NOT USE_SYSTEM_LWS)
     # Workaround: libwebsockets v4.3.3 uses cmake_minimum_required(VERSION 2.8.12)
@@ -565,6 +577,7 @@ set(SOURCES_CORE
     src/cpp/server/wrapped_server.cpp
     src/cpp/server/streaming_proxy.cpp
     src/cpp/server/system_info.cpp
+    src/cpp/server/metrics.cpp
     src/cpp/server/recipe_options.cpp
     src/cpp/server/runtime_config.cpp
     src/cpp/server/logging_config.cpp
@@ -643,6 +656,7 @@ if(USE_SYSTEM_HTTPLIB)
     target_link_libraries(lemonade-server-core PUBLIC cpp-httplib)
 else()
     target_link_libraries(lemonade-server-core PUBLIC httplib::httplib)
+target_link_libraries(lemonade-server-core PUBLIC prometheus-cpp::core)
 endif()
 
 if(USE_SYSTEM_CLI11)
