@@ -49,7 +49,6 @@ void MetricsCollector::init() {
     registry_ = std::make_shared<prometheus::Registry>();
 
     // ---- Request metrics --------------------------------------------------
-    // No constant labels - dynamic labels are added via Add()
     req_total_ = &prometheus::BuildCounter()
         .Name("lemonade_http_requests_total")
         .Help("Total HTTP requests by method, endpoint, and status code")
@@ -178,12 +177,12 @@ void MetricsCollector::record_inference_telemetry(const std::string& model,
     tokens_output_total_->Add({{"model", model}})
         .Increment(static_cast<double>(output_tokens));
 
-    // TTFT summary - Add(labels, quantiles, max_age_ms, age_buckets)
+    // TTFT summary
     ttft_summary_->Add({{"model", model}}, kDefaultQuantiles,
                        std::chrono::milliseconds{60000}, 5)
         .Observe(ttft_seconds);
 
-    // Tokens/sec histogram - Add(labels, bucket_boundaries)
+    // Tokens/sec histogram
     tps_histogram_->Add({{"model", model}}, kTpsBuckets)
         .Observe(tokens_per_second);
 }
@@ -218,13 +217,15 @@ void MetricsCollector::record_system_resources(double cpu_percent,
                                                  uint64_t system_memory_used_bytes) {
     if (!cpu_usage_ || !gpu_utilization_ || !gpu_memory_used_ || !system_memory_used_) return;
 
-    cpu_usage_->Add({{}})
+    // Use {"instance", "localhost"} instead of empty labels - prometheus-cpp v1.2.0
+    // requires at least one label per metric instance
+    cpu_usage_->Add({{"instance", "localhost"}})
         .Increment(cpu_percent);
     gpu_utilization_->Add({{"device", "auto"}})
         .Increment(gpu_utilization);
     gpu_memory_used_->Add({{"device", "auto"}, {"type", "used"}})
         .Increment(static_cast<double>(gpu_memory_used_bytes));
-    system_memory_used_->Add({{}})
+    system_memory_used_->Add({{"instance", "localhost"}})
         .Increment(static_cast<double>(system_memory_used_bytes));
 }
 
