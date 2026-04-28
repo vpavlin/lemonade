@@ -149,7 +149,7 @@ std::string RuntimeConfig::extra_models_dir() const {
 
 bool RuntimeConfig::no_broadcast() const {
     std::shared_lock lock(mutex_);
-    return config_["no_broadcast"].get<bool>();
+    return config_["no_broadcast"].is_boolean() ? config_["no_broadcast"].get<bool>() : false;
 }
 
 long RuntimeConfig::global_timeout() const {
@@ -174,22 +174,22 @@ int RuntimeConfig::ctx_size() const {
 
 bool RuntimeConfig::offline() const {
     std::shared_lock lock(mutex_);
-    return config_["offline"].get<bool>();
+    return config_["offline"].is_boolean() ? config_["offline"].get<bool>() : false;
 }
 
 bool RuntimeConfig::no_fetch_executables() const {
     std::shared_lock lock(mutex_);
-    return config_["no_fetch_executables"].get<bool>();
+    return config_["no_fetch_executables"].is_boolean() ? config_["no_fetch_executables"].get<bool>() : false;
 }
 
 bool RuntimeConfig::disable_model_filtering() const {
     std::shared_lock lock(mutex_);
-    return config_["disable_model_filtering"].get<bool>();
+    return config_["disable_model_filtering"].is_boolean() ? config_["disable_model_filtering"].get<bool>() : false;
 }
 
 bool RuntimeConfig::enable_dgpu_gtt() const {
     std::shared_lock lock(mutex_);
-    return config_["enable_dgpu_gtt"].get<bool>();
+    return config_["enable_dgpu_gtt"].is_boolean() ? config_["enable_dgpu_gtt"].get<bool>() : false;
 }
 
 std::string RuntimeConfig::rocm_channel() const {
@@ -218,7 +218,7 @@ bool RuntimeConfig::backend_bool(const std::string& backend,
                                   const std::string& key) const {
     std::shared_lock lock(mutex_);
     if (config_.contains(backend) && config_[backend].contains(key)) {
-        return config_[backend][key].get<bool>();
+        return config_[backend][key].is_boolean() ? config_[backend][key].get<bool>() : false;
     }
     return false;
 }

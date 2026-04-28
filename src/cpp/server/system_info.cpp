@@ -679,6 +679,19 @@ std::string SystemInfo::get_os_version() {
     #endif
 }
 
+
+// Helper: safely read "available" from a JSON object.
+// Accepts boolean (true/false) or number (0/1). Returns true only when the
+// value is truthy — this prevents nlohmann::json type_error.302 when a
+// numeric field is stored where a boolean is expected.
+static bool json_available(const json& obj, const char* key = "available") {
+    if (!obj.contains(key)) return false;
+    const auto& val = obj[key];
+    if (val.is_boolean()) return val.get<bool>();
+    if (val.is_number())  return val.get<int>() != 0;
+    return false;
+}
+
 json SystemInfo::build_recipes_info(const json& devices) {
     json recipes;
 
@@ -701,7 +714,7 @@ json SystemInfo::build_recipes_info(const json& devices) {
     // AMD GPUs
     if (devices.contains("amd_gpu") && devices["amd_gpu"].is_array()) {
         for (const auto& gpu : devices["amd_gpu"]) {
-            if (gpu.value("available", false)) {
+            if (json_available(gpu)) {
                 std::string name = gpu.value("name", "");
                 std::string family = gpu.value("family", "");
                 if (!name.empty()) {
@@ -719,7 +732,7 @@ json SystemInfo::build_recipes_info(const json& devices) {
     // AMD NPU
     if (devices.contains("amd_npu") && devices["amd_npu"].is_object()) {
         const auto& npu = devices["amd_npu"];
-        if (npu.value("available", false)) {
+        if (json_available(npu)) {
             std::string name = npu.value("name", "");
             std::string family = npu.value("family", "");
             detected_devices.push_back({
@@ -736,7 +749,7 @@ json SystemInfo::build_recipes_info(const json& devices) {
         if (devices["metal"].is_object()) {
             // Single Metal device (legacy format)
             const auto& metal = devices["metal"];
-            if (metal.value("available", false)) {
+            if (json_available(metal)) {
                 std::string name = metal.value("name", "");
                 std::string family = metal.value("family", "");
                 detected_devices.push_back({
@@ -749,7 +762,7 @@ json SystemInfo::build_recipes_info(const json& devices) {
         } else if (devices["metal"].is_array()) {
             // Multiple Metal devices
             for (const auto& metal : devices["metal"]) {
-                if (metal.value("available", false)) {
+                if (json_available(metal)) {
                     std::string name = metal.value("name", "");
                     std::string family = metal.value("family", "");
                     if (!name.empty()) {
@@ -1510,7 +1523,7 @@ std::string SystemInfo::get_rocm_arch() {
         // Check AMD GPUs
         if (devices.contains("amd_gpu") && devices["amd_gpu"].is_array()) {
             for (const auto& gpu : devices["amd_gpu"]) {
-                if (gpu.value("available", false)) {
+                if (json_available(gpu)) {
                     std::string name = gpu.value("name", "");
                     if (!name.empty()) {
                         std::string arch = identify_rocm_arch_from_name(name);

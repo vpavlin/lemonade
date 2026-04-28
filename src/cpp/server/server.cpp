@@ -4065,7 +4065,7 @@ void Server::enrich_recipes(json& recipes) {
                 if (!enrichment.download_filename.empty()) {
                     backend_info["download_filename"] = enrichment.download_filename;
                 }
-                if (!backend_info.contains("version") || backend_info["version"].get<std::string>().empty()) {
+                if (!backend_info.contains("version") || !backend_info["version"].is_string() || backend_info["version"].get<std::string>().empty()) {
                     if (!enrichment.version.empty()) {
                         backend_info["version"] = enrichment.version;
                     }
