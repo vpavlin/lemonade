@@ -2811,13 +2811,21 @@ void Server::handle_responses(const httplib::Request& req, httplib::Response& re
             double ttft_seconds = 0.0;
             double tps = 0.0;
 
-            // Try to extract telemetry from "usage" field (OpenAI-compatible format)
+            // Try to extract telemetry from "usage" field (FLM + OpenAI formats)
             if (response.contains("usage")) {
                 auto usage = response["usage"];
-                if (usage.contains("prompt_tokens")) {
+                // FLM format: input_tokens / output_tokens
+                if (usage.contains("input_tokens") && input_tokens == 0) {
+                    input_tokens = usage["input_tokens"].get<int>();
+                }
+                if (usage.contains("output_tokens") && output_tokens == 0) {
+                    output_tokens = usage["output_tokens"].get<int>();
+                }
+                // OpenAI format: prompt_tokens / completion_tokens
+                if (usage.contains("prompt_tokens") && input_tokens == 0) {
                     input_tokens = usage["prompt_tokens"].get<int>();
                 }
-                if (usage.contains("completion_tokens")) {
+                if (usage.contains("completion_tokens") && output_tokens == 0) {
                     output_tokens = usage["completion_tokens"].get<int>();
                 }
             }
@@ -2840,6 +2848,14 @@ void Server::handle_responses(const httplib::Request& req, httplib::Response& re
                     auto& message = first_choice["message"];
                     if (message.contains("usage")) {
                         auto usage = message["usage"];
+                        // FLM format: input_tokens / output_tokens
+                        if (input_tokens == 0 && usage.contains("input_tokens")) {
+                            input_tokens = usage["input_tokens"].get<int>();
+                        }
+                        if (output_tokens == 0 && usage.contains("output_tokens")) {
+                            output_tokens = usage["output_tokens"].get<int>();
+                        }
+                        // OpenAI format: prompt_tokens / completion_tokens
                         if (input_tokens == 0 && usage.contains("prompt_tokens")) {
                             input_tokens = usage["prompt_tokens"].get<int>();
                         }
@@ -2875,6 +2891,31 @@ void Server::handle_responses(const httplib::Request& req, httplib::Response& re
             }
             MetricsCollector::instance().record_inference_telemetry(
                 model_name, input_tokens, output_tokens, ttft_seconds, tps, backend, backend_version);
+
+            // Calculate prefill/decode TPS from timings if available
+            double prefill_tps = 0.0;
+            double decode_tps = 0.0;
+            if (response.contains("timings")) {
+                auto ut = response["timings"];
+                if (ut.contains("prompt_n") && ut.contains("prompt_ms")) {
+                    int prompt_n = ut["prompt_n"].get<int>();
+                    double prompt_ms = ut["prompt_ms"].get<double>();
+                    if (prompt_ms > 0) prefill_tps = static_cast<double>(prompt_n) / (prompt_ms / 1000.0);
+                }
+                if (ut.contains("predicted_n") && ut.contains("predicted_ms")) {
+                    int predicted_n = ut["predicted_n"].get<int>();
+                    double predicted_ms = ut["predicted_ms"].get<double>();
+                    if (predicted_ms > 0) decode_tps = static_cast<double>(predicted_n) / (predicted_ms / 1000.0);
+                }
+            }
+
+            // Record split prefill/decode throughput
+            if (prefill_tps > 0) {
+                MetricsCollector::instance().record_prefill_tps(model_name, prefill_tps, backend, backend_version);
+            }
+            if (decode_tps > 0) {
+                MetricsCollector::instance().record_decode_tps(model_name, decode_tps, backend, backend_version);
+            }
 
             // Record request duration
             {
