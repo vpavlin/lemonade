@@ -1,5 +1,6 @@
 #include "lemon/metrics.h"
 #include <lemon/utils/aixlog.hpp>
+#include <lemon/version.h>
 
 // Prometheus-cpp includes (v1.2.0 API)
 #include <prometheus/counter.h>
@@ -56,6 +57,13 @@ void MetricsCollector::init() {
 
     registry_ = std::make_shared<prometheus::Registry>();
 
+    // ---- Version info (single-sample gauge) -------------------------------
+    // Standard Prometheus pattern: version_info{version="x.y.z",build_type="..."}=1
+    version_info_ = &prometheus::BuildGauge()
+        .Name("lemonade_version_info")
+        .Help("Lemonade server version info (single-sample gauge)")
+        .Register(*registry_);
+
     // ---- Request metrics --------------------------------------------------
     req_total_ = &prometheus::BuildCounter()
         .Name("lemonade_http_requests_total")
@@ -99,7 +107,7 @@ void MetricsCollector::init() {
         .Help("Token throughput in tokens per second")
         .Register(*registry_);
 
-    // ---- Model lifecycle metrics ------------------------------------------
+    // Model lifecycle
     models_loaded_ = &prometheus::BuildGauge()
         .Name("lemonade_models_loaded")
         .Help("Currently loaded models (1 = loaded, 0 = unloaded)")
@@ -115,7 +123,7 @@ void MetricsCollector::init() {
         .Help("Total model unload operations")
         .Register(*registry_);
 
-    // ---- System resource gauges -------------------------------------------
+    // System resources
     cpu_usage_ = &prometheus::BuildGauge()
         .Name("lemonade_cpu_usage_percent")
         .Help("CPU usage percentage")
@@ -136,7 +144,7 @@ void MetricsCollector::init() {
         .Help("System memory usage in bytes")
         .Register(*registry_);
 
-    // ---- Error metrics ----------------------------------------------------
+    // Error metrics
     errors_total_ = &prometheus::BuildCounter()
         .Name("lemonade_errors_total")
         .Help("Total errors by endpoint and error type")
@@ -147,7 +155,7 @@ void MetricsCollector::init() {
         .Help("Errors broken down by endpoint, error type, and model")
         .Register(*registry_);
 
-    // ---- Streaming metrics ------------------------------------------------
+    // Streaming metrics
     stream_chunks_total_ = &prometheus::BuildCounter()
         .Name("lemonade_stream_chunks_total")
         .Help("Total streaming chunks sent via SSE")
@@ -155,16 +163,22 @@ void MetricsCollector::init() {
 
     stream_duration_ = &prometheus::BuildHistogram()
         .Name("lemonade_stream_duration_seconds")
-        .Help("Total duration of streaming responses in seconds")
+        .Help("Duration of streaming responses in seconds")
         .Register(*registry_);
 
-    LOG(INFO, "Metrics") << "Prometheus metrics collector initialized" << std::endl;
+    // Set the version_info gauge to 1 (single-sample gauge pattern)
+    version_info_->Add({{"version", LEMON_VERSION_STRING}})
+        .Set(1.0);
+
+    LOG(INFO, "Metrics") << "Version: " << LEMON_VERSION_STRING << std::endl;
 }
 
 void MetricsCollector::shutdown() {
     registry_.reset();
     LOG(INFO, "Metrics") << "Prometheus metrics collector shut down" << std::endl;
 }
+
+// ---- Metric accessors -----------------------------------------------------
 
 std::shared_ptr<prometheus::Registry> MetricsCollector::get_registry() {
     return registry_;
@@ -192,10 +206,12 @@ void MetricsCollector::record_request(const std::string& method,
 }
 
 void MetricsCollector::record_request_duration(const std::string& endpoint,
-                                                 double duration_seconds,
-                                                 const std::string& /*model*/) {
+                                                  double duration_seconds,
+                                                  const std::string& model) {
     if (!req_duration_) return;
-    req_duration_->Add({{"endpoint", endpoint}}, kDefaultHistBuckets)
+    std::string model_label = model.empty() ? "unknown" : model;
+    req_duration_->Add({{"endpoint", endpoint},
+                        {"model", model_label}}, kDefaultHistBuckets)
         .Observe(duration_seconds);
 }
 
@@ -329,6 +345,12 @@ void MetricsCollector::record_error(const std::string& endpoint,
                                   {"error_type", error_label},
                                   {"model", model_label}})
         .Increment();
+}
+
+void MetricsCollector::record_version_info(const std::string& version_string) {
+    if (!version_info_) return;
+    version_info_->Add({{"version", version_string.empty() ? "unknown" : version_string}})
+        .Set(1.0);
 }
 
 } // namespace lemon

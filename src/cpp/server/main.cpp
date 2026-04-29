@@ -114,6 +114,7 @@ int main(int argc, char** argv) {
         Server server(config, cli_config.cache_dir);
 
         g_server_instance = &server;
+        MetricsCollector::instance().record_version_info(LEMON_VERSION_STRING);
         std::signal(SIGINT, signal_handler);
         std::signal(SIGTERM, signal_handler);
 #ifdef SIGHUP

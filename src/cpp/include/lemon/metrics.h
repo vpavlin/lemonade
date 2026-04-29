@@ -101,6 +101,9 @@ public:
                       const std::string& error_type,
                       const std::string& model = "");
 
+    /// Record version info as a single-sample gauge (prometheus best practice)
+    void record_version_info(const std::string& version_string);
+
     // --- Access to Prometheus registry -------------------------------------
     std::shared_ptr<prometheus::Registry> get_registry();
 
@@ -149,6 +152,9 @@ private:
     // Streaming metrics
     prometheus::Family<prometheus::Counter>* stream_chunks_total_ = nullptr;
     prometheus::Family<prometheus::Histogram>* stream_duration_ = nullptr;
+
+    // Version info metric (single-sample gauge)
+    prometheus::Family<prometheus::Gauge>* version_info_ = nullptr;
 };
 
 } // namespace lemon
