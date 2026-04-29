@@ -2638,6 +2638,15 @@ void Server::handle_responses(const httplib::Request& req, httplib::Response& re
     try {
         auto request_json = nlohmann::json::parse(req.body);
 
+        // Record request metric (status will be updated at the end)
+        MetricsCollector::instance().record_request("POST", req.path, 200);
+
+        // Record request body size
+        MetricsCollector::instance().record_request_size(req.path, req.body.size());
+
+        // Start timing for request duration
+        auto start = std::chrono::steady_clock::now();
+
         // Handle model loading/switching using helper function
         if (request_json.contains("model")) {
             std::string requested_model = request_json["model"];
@@ -2649,12 +2658,14 @@ void Server::handle_responses(const httplib::Request& req, httplib::Response& re
                 std::string error_code = error_response["error"]["code"].get<std::string>();
                 res.status = (error_code == "model_load_error") ? 500 : 404;
                 res.set_content(error_response.dump(), "application/json");
+                MetricsCollector::instance().record_error(req.path, "model_load_error", requested_model);
                 return;
             }
         } else if (!router_->is_model_loaded()) {
             LOG(ERROR, "Server") << "No model loaded and no model specified in request" << std::endl;
             res.status = 400;
             res.set_content("{\"error\": \"No model loaded and no model specified in request\"}", "application/json");
+            MetricsCollector::instance().record_error(req.path, "no_model", "");
             return;
         }
 
@@ -2678,6 +2689,10 @@ void Server::handle_responses(const httplib::Request& req, httplib::Response& re
                             return false; // Only stream once
                         }
 
+                        // Record streaming chunk
+                        std::string model_name = router_->get_loaded_model();
+                        MetricsCollector::instance().record_stream_chunk(model_name, req.path);
+
                         // Use unified Router path for streaming
                         router_->responses_stream(request_body, sink);
 
@@ -2688,14 +2703,104 @@ void Server::handle_responses(const httplib::Request& req, httplib::Response& re
                 LOG(ERROR, "Server") << "Streaming failed: " << e.what() << std::endl;
                 res.status = 500;
                 res.set_content("{\"error\":\"Internal server error during streaming\"}", "application/json");
+                MetricsCollector::instance().record_error(req.path, "streaming_error", router_->get_loaded_model());
             }
+
+            // Record request duration (for streaming, response size is unknown upfront)
+            {
+                auto end = std::chrono::steady_clock::now();
+                double duration_seconds = std::chrono::duration<double>(end - start).count();
+                MetricsCollector::instance().record_request_duration(req.path, duration_seconds);
+            }
+
         } else {
             LOG(INFO, "Server") << "POST /api/v1/responses - Non-streaming" << std::endl;
 
             auto response = router_->responses(request_json);
 
+            // Record response body size
+            MetricsCollector::instance().record_response_size(req.path, response.dump().size());
+
             LOG(INFO, "Server") << "200 OK" << std::endl;
             res.set_content(response.dump(), "application/json");
+
+            // Extract and record inference telemetry from the response
+            int input_tokens = 0;
+            int output_tokens = 0;
+            double ttft_seconds = 0.0;
+            double tps = 0.0;
+
+            // Try to extract telemetry from "usage" field (OpenAI-compatible format)
+            if (response.contains("usage")) {
+                auto usage = response["usage"];
+                if (usage.contains("prompt_tokens")) {
+                    input_tokens = usage["prompt_tokens"].get<int>();
+                }
+                if (usage.contains("completion_tokens")) {
+                    output_tokens = usage["completion_tokens"].get<int>();
+                }
+            }
+
+            // Try to extract telemetry from "timings" field (llama.cpp format)
+            if (response.contains("timings")) {
+                auto timings = response["timings"];
+                if (timings.contains("prompt_ms")) {
+                    ttft_seconds = timings["prompt_ms"].get<double>() / 1000.0;
+                }
+                if (timings.contains("predicted_per_second")) {
+                    tps = timings["predicted_per_second"].get<double>();
+                }
+            }
+
+            // Also check for FLM-specific telemetry fields in the response
+            if (response.contains("choices") && !response["choices"].empty()) {
+                auto& first_choice = response["choices"][0];
+                if (first_choice.contains("message")) {
+                    auto& message = first_choice["message"];
+                    if (message.contains("usage")) {
+                        auto usage = message["usage"];
+                        if (input_tokens == 0 && usage.contains("prompt_tokens")) {
+                            input_tokens = usage["prompt_tokens"].get<int>();
+                        }
+                        if (output_tokens == 0 && usage.contains("completion_tokens")) {
+                            output_tokens = usage["completion_tokens"].get<int>();
+                        }
+                    }
+                }
+            }
+
+            // Extract token counts from "content" field if available (FLM format)
+            if (response.contains("content") && response["content"].is_array()) {
+                for (const auto& item : response["content"]) {
+                    if (item.contains("token_count")) {
+                        output_tokens += item["token_count"].get<int>();
+                    }
+                }
+            }
+
+            // Save telemetry to router
+            router_->update_telemetry(input_tokens, output_tokens, ttft_seconds, tps);
+
+            // Record Prometheus metrics with backend version
+            std::string model_name = router_->get_loaded_model();
+            auto recipe_opts = router_->get_model_recipe_options(model_name);
+            std::string backend = recipe_opts.get_recipe();
+            std::string backend_version = "unknown";
+            try {
+                auto* bm = BackendManager::global();
+                if (bm) backend_version = bm->get_latest_version(backend, backend);
+            } catch (...) {
+                // Silently ignore — version is informational only
+            }
+            MetricsCollector::instance().record_inference_telemetry(
+                model_name, input_tokens, output_tokens, ttft_seconds, tps, backend, backend_version);
+
+            // Record request duration
+            {
+                auto end = std::chrono::steady_clock::now();
+                double duration_seconds = std::chrono::duration<double>(end - start).count();
+                MetricsCollector::instance().record_request_duration(req.path, duration_seconds);
+            }
         }
 
     } catch (const std::exception& e) {
@@ -2703,9 +2808,14 @@ void Server::handle_responses(const httplib::Request& req, httplib::Response& re
         res.status = 500;
         nlohmann::json error = {{"error", e.what()}};
         res.set_content(error.dump(), "application/json");
+        MetricsCollector::instance().record_error(req.path, "internal_error", router_->get_loaded_model());
+
+        // Record request duration even on error
+        auto end = std::chrono::steady_clock::now();
+        double duration_seconds = std::chrono::duration<double>(end - start).count();
+        MetricsCollector::instance().record_request_duration(req.path, duration_seconds);
     }
 }
-
 void Server::handle_pull(const httplib::Request& req, httplib::Response& res) {
     try {
         auto request_json = nlohmann::json::parse(req.body);
