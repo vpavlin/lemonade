@@ -195,37 +195,12 @@ int main(int argc, char** argv) {
                     }
                 }
                 
-                // Try to read GPU stats from /sys/class/drm or nvidia-smi
+                // Read GPU stats via Server::get_gpu_usage() which handles AMD sysfs
                 double gpu_util = 0.0;
                 uint64_t gpu_mem_used = 0;
-                
-                // Check for NVIDIA GPUs via nvidia-smi
-                std::ifstream smi("/proc/driver/nvidia/gpus/0/memory");
-                if (smi.good()) {
-                    std::string line;
-                    while (std::getline(smi, line)) {
-                        if (line.find("Used:") == 0) {
-                            std::istringstream iss(line);
-                            std::string label;
-                            uint64_t val;
-                            iss >> label >> val;
-                            gpu_mem_used = val * 1024; // Convert from kB to bytes
-                        }
-                    }
-                    smi.close();
-                } else {
-                    // Try nvidia-smi command as fallback
-                    FILE* fp = popen("nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits 2>/dev/null", "r");
-                    if (fp) {
-                        char line[256];
-                        if (fgets(line, sizeof(line), fp)) {
-                            uint64_t gpu_mem_tmp;
-                            sscanf(line, "%lf %" PRIu64, &gpu_util, &gpu_mem_tmp);
-                            gpu_mem_used = gpu_mem_tmp;
-                            gpu_mem_used *= 1024 * 1024; // Convert MB to bytes
-                        }
-                        pclose(fp);
-                    }
+                if (g_server_instance) {
+                    gpu_util = g_server_instance->get_gpu_usage();
+                    gpu_mem_used = static_cast<uint64_t>(g_server_instance->get_vram_usage() * 1024.0 * 1024.0); // GB to bytes
                 }
                 
                 auto& collector = MetricsCollector::instance();

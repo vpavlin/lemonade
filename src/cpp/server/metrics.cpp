@@ -220,13 +220,13 @@ void MetricsCollector::record_system_resources(double cpu_percent,
     // Use {"instance", "localhost"} instead of empty labels - prometheus-cpp v1.2.0
     // requires at least one label per metric instance
     cpu_usage_->Add({{"instance", "localhost"}})
-        .Increment(cpu_percent);
+        .Set(cpu_percent);
     gpu_utilization_->Add({{"device", "auto"}})
-        .Increment(gpu_utilization);
+        .Set(gpu_utilization);
     gpu_memory_used_->Add({{"device", "auto"}, {"type", "used"}})
-        .Increment(static_cast<double>(gpu_memory_used_bytes));
+        .Set(static_cast<double>(gpu_memory_used_bytes));
     system_memory_used_->Add({{"instance", "localhost"}})
-        .Increment(static_cast<double>(system_memory_used_bytes));
+        .Set(static_cast<double>(system_memory_used_bytes));
 }
 
 } // namespace lemon

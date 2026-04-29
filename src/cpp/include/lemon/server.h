@@ -35,6 +35,10 @@ public:
     // Get server status
     bool is_running() const;
 
+    double get_cpu_usage();
+    double get_gpu_usage();
+    double get_vram_usage();
+    double get_npu_utilization();
 private:
     std::string resolve_host_to_ip(int ai_family, const std::string& host);
     void setup_routes(httplib::Server &web_server);
@@ -130,10 +134,6 @@ private:
     // Helper function to generate detailed model error responses (not found, not supported, load failure)
     nlohmann::json create_model_error(const std::string& requested_model, const std::string& exception_msg);
     // System stats helper methods
-    double get_cpu_usage();
-    double get_gpu_usage();
-    double get_vram_usage();
-    double get_npu_utilization();
 
     std::shared_ptr<RuntimeConfig> config_;
     std::string cache_dir_;  // Lemonade cache dir for config.json persistence
