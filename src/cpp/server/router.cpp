@@ -1,4 +1,5 @@
 #include "lemon/router.h"
+#include <lemon/metrics.h>
 #include "lemon/backends/llamacpp_server.h"
 #include "lemon/backends/fastflowlm_server.h"
 #include "lemon/backends/ryzenaiserver.h"
@@ -750,18 +751,100 @@ void Router::update_prompt_tokens(int prompt_tokens) {
 void Router::chat_completion_stream(const std::string& request_body, httplib::DataSink& sink) {
     execute_streaming(request_body, sink, [&](WrappedServer* server) {
         server->forward_streaming_request("/v1/chat/completions", request_body, sink);
+
+        // Record inference telemetry from streaming proxy's captured telemetry
+        auto telemetry = server->get_telemetry();
+        if (telemetry.input_tokens > 0 || telemetry.output_tokens > 0) {
+            std::string model_name = server->get_model_name();
+            auto recipe_opts = server->get_recipe_options();
+            std::string backend = recipe_opts.get_recipe();
+            MetricsCollector::instance().record_inference_telemetry(
+                model_name, telemetry.input_tokens, telemetry.output_tokens,
+                telemetry.time_to_first_token, telemetry.tokens_per_second,
+                backend, "unknown");
+
+            // Calculate and record prefill/decode TPS from streaming telemetry
+            double prefill_tps = 0.0;
+            double decode_tps = 0.0;
+            if (telemetry.time_to_first_token > 0 && telemetry.input_tokens > 0) {
+                prefill_tps = static_cast<double>(telemetry.input_tokens) / telemetry.time_to_first_token;
+            }
+            if (telemetry.tokens_per_second > 0) {
+                decode_tps = telemetry.tokens_per_second;
+            }
+            if (prefill_tps > 0) {
+                MetricsCollector::instance().record_prefill_tps(model_name, prefill_tps, backend, "unknown");
+            }
+            if (decode_tps > 0) {
+                MetricsCollector::instance().record_decode_tps(model_name, decode_tps, backend, "unknown");
+            }
+        }
     });
 }
 
 void Router::completion_stream(const std::string& request_body, httplib::DataSink& sink) {
     execute_streaming(request_body, sink, [&](WrappedServer* server) {
         server->forward_streaming_request("/v1/completions", request_body, sink);
+
+        // Record inference telemetry from streaming proxy's captured telemetry
+        auto telemetry = server->get_telemetry();
+        if (telemetry.input_tokens > 0 || telemetry.output_tokens > 0) {
+            std::string model_name = server->get_model_name();
+            auto recipe_opts = server->get_recipe_options();
+            std::string backend = recipe_opts.get_recipe();
+            MetricsCollector::instance().record_inference_telemetry(
+                model_name, telemetry.input_tokens, telemetry.output_tokens,
+                telemetry.time_to_first_token, telemetry.tokens_per_second,
+                backend, "unknown");
+
+            double prefill_tps = 0.0;
+            double decode_tps = 0.0;
+            if (telemetry.time_to_first_token > 0 && telemetry.input_tokens > 0) {
+                prefill_tps = static_cast<double>(telemetry.input_tokens) / telemetry.time_to_first_token;
+            }
+            if (telemetry.tokens_per_second > 0) {
+                decode_tps = telemetry.tokens_per_second;
+            }
+            if (prefill_tps > 0) {
+                MetricsCollector::instance().record_prefill_tps(model_name, prefill_tps, backend, "unknown");
+            }
+            if (decode_tps > 0) {
+                MetricsCollector::instance().record_decode_tps(model_name, decode_tps, backend, "unknown");
+            }
+        }
     });
 }
 
 void Router::responses_stream(const std::string& request_body, httplib::DataSink& sink) {
     execute_streaming(request_body, sink, [&](WrappedServer* server) {
         server->forward_streaming_request("/v1/responses", request_body, sink);
+
+        // Record inference telemetry from streaming proxy's captured telemetry
+        auto telemetry = server->get_telemetry();
+        if (telemetry.input_tokens > 0 || telemetry.output_tokens > 0) {
+            std::string model_name = server->get_model_name();
+            auto recipe_opts = server->get_recipe_options();
+            std::string backend = recipe_opts.get_recipe();
+            MetricsCollector::instance().record_inference_telemetry(
+                model_name, telemetry.input_tokens, telemetry.output_tokens,
+                telemetry.time_to_first_token, telemetry.tokens_per_second,
+                backend, "unknown");
+
+            double prefill_tps = 0.0;
+            double decode_tps = 0.0;
+            if (telemetry.time_to_first_token > 0 && telemetry.input_tokens > 0) {
+                prefill_tps = static_cast<double>(telemetry.input_tokens) / telemetry.time_to_first_token;
+            }
+            if (telemetry.tokens_per_second > 0) {
+                decode_tps = telemetry.tokens_per_second;
+            }
+            if (prefill_tps > 0) {
+                MetricsCollector::instance().record_prefill_tps(model_name, prefill_tps, backend, "unknown");
+            }
+            if (decode_tps > 0) {
+                MetricsCollector::instance().record_decode_tps(model_name, decode_tps, backend, "unknown");
+            }
+        }
     });
 }
 
