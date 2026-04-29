@@ -57,11 +57,14 @@ public:
                                  const std::string& model = "");
 
     /// Record inference telemetry (called after each backend call)
+    /// Added backend and backend_version labels for per-backend comparison
     void record_inference_telemetry(const std::string& model,
                                     int input_tokens,
                                     int output_tokens,
                                     double ttft_seconds,
-                                    double tokens_per_second);
+                                    double tokens_per_second,
+                                    const std::string& backend = "",
+                                    const std::string& backend_version = "");
 
     /// Record model load/unload event
     void record_model_event(const std::string& model,
@@ -73,6 +76,30 @@ public:
                                  double gpu_utilization,
                                  uint64_t gpu_memory_used_bytes,
                                  uint64_t system_memory_used_bytes);
+
+    // --- New metric helpers ------------------------------------------------
+
+    /// Record HTTP request body size in bytes
+    void record_request_size(const std::string& endpoint,
+                             size_t body_size_bytes);
+
+    /// Record HTTP response body size in bytes
+    void record_response_size(const std::string& endpoint,
+                              size_t body_size_bytes);
+
+    /// Record a streaming chunk sent (SSE)
+    void record_stream_chunk(const std::string& model,
+                             const std::string& endpoint);
+
+    /// Record stream completion duration in seconds
+    void record_stream_duration(const std::string& model,
+                                const std::string& endpoint,
+                                double duration_seconds);
+
+    /// Record an error event
+    void record_error(const std::string& endpoint,
+                      const std::string& error_type,
+                      const std::string& model = "");
 
     // --- Access to Prometheus registry -------------------------------------
     std::shared_ptr<prometheus::Registry> get_registry();
@@ -91,10 +118,14 @@ private:
 
     // --- Metric families (raw pointers, owned by registry) -----------------
     // Register() returns Family<T>* which we store as raw pointers
+
+    // Request metrics
     prometheus::Family<prometheus::Counter>* req_total_ = nullptr;
     prometheus::Family<prometheus::Histogram>* req_duration_ = nullptr;
+    prometheus::Family<prometheus::Histogram>* req_body_bytes_ = nullptr;
+    prometheus::Family<prometheus::Histogram>* resp_body_bytes_ = nullptr;
 
-    // Inference metrics
+    // Inference metrics (with backend/version labels)
     prometheus::Family<prometheus::Counter>* tokens_input_total_ = nullptr;
     prometheus::Family<prometheus::Counter>* tokens_output_total_ = nullptr;
     prometheus::Family<prometheus::Summary>* ttft_summary_ = nullptr;
@@ -113,6 +144,11 @@ private:
 
     // Error metrics
     prometheus::Family<prometheus::Counter>* errors_total_ = nullptr;
+    prometheus::Family<prometheus::Counter>* endpoint_errors_total_ = nullptr;
+
+    // Streaming metrics
+    prometheus::Family<prometheus::Counter>* stream_chunks_total_ = nullptr;
+    prometheus::Family<prometheus::Histogram>* stream_duration_ = nullptr;
 };
 
 } // namespace lemon

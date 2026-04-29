@@ -1329,11 +1329,15 @@ void Server::handle_model_by_id(const httplib::Request& req, httplib::Response& 
 
 void Server::handle_chat_completions(const httplib::Request& req, httplib::Response& res) {
     try {
-        // Record request metric
-        MetricsCollector::instance().record_request("POST", req.path, 0);
+        // Record request metric (status will be updated at the end)
+        MetricsCollector::instance().record_request("POST", req.path, 200);
 
-        // Start timing
+        // Start timing for request duration
         auto start = std::chrono::steady_clock::now();
+
+
+        // Record request body size
+        MetricsCollector::instance().record_request_size(req.path, req.body.size());
         auto request_json = nlohmann::json::parse(req.body);
 
         // Debug: Check if tools are present
@@ -1411,7 +1415,7 @@ void Server::handle_chat_completions(const httplib::Request& req, httplib::Respo
                 // Use cpp-httplib's chunked content provider for SSE streaming
                 res.set_chunked_content_provider(
                     "text/event-stream",
-                    [this, request_body](size_t offset, httplib::DataSink& sink) {
+                    [this, request_body, &req](size_t offset, httplib::DataSink& sink) {
                         // For chunked responses, offset tracks bytes sent so far
                         // We only want to stream once when offset is 0
                         if (offset > 0) {
@@ -1419,6 +1423,8 @@ void Server::handle_chat_completions(const httplib::Request& req, httplib::Respo
                         }
 
                         // Use unified Router path for streaming
+                        std::string model_name = router_->get_loaded_model();
+                        MetricsCollector::instance().record_stream_chunk(model_name, req.path);
                         router_->chat_completion_stream(request_body, sink);
 
                         return false;
@@ -1451,7 +1457,8 @@ void Server::handle_chat_completions(const httplib::Request& req, httplib::Respo
                 }
             }
 
-            res.set_content(response.dump(), "application/json");
+            // Record response body size
+            MetricsCollector::instance().record_response_size(req.path, response.dump().size());
 
             // Print and save telemetry for non-streaming
             // llama-server includes timing data in the response under "timings" field
@@ -1486,10 +1493,19 @@ void Server::handle_chat_completions(const httplib::Request& req, httplib::Respo
                 // Save telemetry to router
                 router_->update_telemetry(input_tokens, output_tokens, ttft_seconds, tps);
 
-                // Record Prometheus metrics
+                // Record Prometheus metrics with backend version
                 std::string model_name = router_->get_loaded_model();
+                auto recipe_opts = router_->get_model_recipe_options(model_name);
+                std::string backend = recipe_opts.get_recipe();
+                std::string backend_version = "unknown";
+                try {
+                    auto* bm = BackendManager::global();
+                    if (bm) backend_version = bm->get_latest_version(backend, backend);
+                } catch (...) {
+                    // Silently ignore — version is informational only
+                }
                 MetricsCollector::instance().record_inference_telemetry(
-                    model_name, input_tokens, output_tokens, ttft_seconds, tps);
+                    model_name, input_tokens, output_tokens, ttft_seconds, tps, backend, backend_version);
             } else if (response.contains("usage")) {
                 // OpenAI format uses "usage" field
                 auto usage = response["usage"];
@@ -1524,10 +1540,19 @@ void Server::handle_chat_completions(const httplib::Request& req, httplib::Respo
                 // Save telemetry to router
                 router_->update_telemetry(input_tokens, output_tokens, ttft_seconds, tps);
 
-                // Record Prometheus metrics
+                // Record Prometheus metrics with backend version
                 std::string model_name = router_->get_loaded_model();
+                auto recipe_opts = router_->get_model_recipe_options(model_name);
+                std::string backend = recipe_opts.get_recipe();
+                std::string backend_version = "unknown";
+                try {
+                    auto* bm = BackendManager::global();
+                    if (bm) backend_version = bm->get_latest_version(backend, backend);
+                } catch (...) {
+                    // Silently ignore — version is informational only
+                }
                 MetricsCollector::instance().record_inference_telemetry(
-                    model_name, input_tokens, output_tokens, ttft_seconds, tps);
+                    model_name, input_tokens, output_tokens, ttft_seconds, tps, backend, backend_version);
             }
 
             // Capture prompt_tokens from usage if available
@@ -1545,11 +1570,31 @@ void Server::handle_chat_completions(const httplib::Request& req, httplib::Respo
         res.status = 500;
         nlohmann::json error = {{"error", e.what()}};
         res.set_content(error.dump(), "application/json");
+        MetricsCollector::instance().record_error(req.path, "internal_error");
+        // Record duration even on error
+        {
+            auto end = std::chrono::steady_clock::now();
+
+        }
+    }
+{
+        auto end = std::chrono::steady_clock::now();
+
     }
 }
 
 void Server::handle_completions(const httplib::Request& req, httplib::Response& res) {
     try {
+        // Record request metric (status will be updated at the end)
+        MetricsCollector::instance().record_request("POST", req.path, 200);
+
+        // Start timing for request duration
+        auto start = std::chrono::steady_clock::now();
+
+
+        // Record request body size
+        MetricsCollector::instance().record_request_size(req.path, req.body.size());
+
         auto request_json = nlohmann::json::parse(req.body);
 
         // Handle model loading/switching (same logic as chat_completions)
@@ -1604,7 +1649,7 @@ void Server::handle_completions(const httplib::Request& req, httplib::Response& 
 
                 res.set_chunked_content_provider(
                     "text/event-stream",
-                    [this, request_body](size_t offset, httplib::DataSink& sink) {
+                    [this, request_body, &req](size_t offset, httplib::DataSink& sink) {
                         if (offset > 0) {
                             return false; // Already sent everything
                         }
@@ -1646,7 +1691,8 @@ void Server::handle_completions(const httplib::Request& req, httplib::Response& 
                 return;
             }
 
-            res.set_content(response.dump(), "application/json");
+            // Record response body size
+            MetricsCollector::instance().record_response_size(req.path, response.dump().size());
 
             // Print and save telemetry for non-streaming completions
             if (response.contains("timings")) {
@@ -1680,10 +1726,19 @@ void Server::handle_completions(const httplib::Request& req, httplib::Response& 
                 // Save telemetry to router
                 router_->update_telemetry(input_tokens, output_tokens, ttft_seconds, tps);
 
-                // Record Prometheus metrics
+                // Record Prometheus metrics with backend version
                 std::string model_name = router_->get_loaded_model();
+                auto recipe_opts = router_->get_model_recipe_options(model_name);
+                std::string backend = recipe_opts.get_recipe();
+                std::string backend_version = "unknown";
+                try {
+                    auto* bm = BackendManager::global();
+                    if (bm) backend_version = bm->get_latest_version(backend, backend);
+                } catch (...) {
+                    // Silently ignore — version is informational only
+                }
                 MetricsCollector::instance().record_inference_telemetry(
-                    model_name, input_tokens, output_tokens, ttft_seconds, tps);
+                    model_name, input_tokens, output_tokens, ttft_seconds, tps, backend, backend_version);
             } else if (response.contains("usage")) {
                 auto usage = response["usage"];
                 int input_tokens = 0;
@@ -1712,10 +1767,19 @@ void Server::handle_completions(const httplib::Request& req, httplib::Response& 
                     LOG(INFO, "Telemetry") << "TPS:           " << std::fixed << std::setprecision(2)
                              << tps << std::endl;
 
-                // Record Prometheus metrics
+                // Record Prometheus metrics with backend version
                 std::string model_name = router_->get_loaded_model();
+                auto recipe_opts = router_->get_model_recipe_options(model_name);
+                std::string backend = recipe_opts.get_recipe();
+                std::string backend_version = "unknown";
+                try {
+                    auto* bm = BackendManager::global();
+                    if (bm) backend_version = bm->get_latest_version(backend, backend);
+                } catch (...) {
+                    // Silently ignore — version is informational only
+                }
                 MetricsCollector::instance().record_inference_telemetry(
-                    model_name, input_tokens, output_tokens, ttft_seconds, tps);
+                    model_name, input_tokens, output_tokens, ttft_seconds, tps, backend, backend_version);
                 }
                 LOG(INFO, "Telemetry") << "=================" << std::endl;
 
@@ -1743,6 +1807,11 @@ void Server::handle_completions(const httplib::Request& req, httplib::Response& 
 
 void Server::handle_embeddings(const httplib::Request& req, httplib::Response& res) {
     try {
+        MetricsCollector::instance().record_request("POST", req.path, 200);
+        auto start = std::chrono::steady_clock::now();
+
+        MetricsCollector::instance().record_request_size(req.path, req.body.size());
+
         auto request_json = nlohmann::json::parse(req.body);
 
         // Handle model loading/switching using helper function
@@ -1915,6 +1984,10 @@ void Server::handle_audio_transcriptions(const httplib::Request& req, httplib::R
         }}};
         res.set_content(error.dump(), "application/json");
     }
+{
+        auto end = std::chrono::steady_clock::now();
+
+    }
 }
 
 void Server::handle_audio_speech(const httplib::Request& req, httplib::Response& res) {
@@ -2030,6 +2103,10 @@ void Server::handle_audio_speech(const httplib::Request& req, httplib::Response&
 
 void Server::handle_image_generations(const httplib::Request& req, httplib::Response& res) {
     try {
+        MetricsCollector::instance().record_request("POST", req.path, 200);
+        auto start = std::chrono::steady_clock::now();
+
+        MetricsCollector::instance().record_request_size(req.path, req.body.size());
         LOG(INFO, "Server") << "POST /api/v1/images/generations" << std::endl;
 
         auto request_json = nlohmann::json::parse(req.body);

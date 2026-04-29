@@ -23,6 +23,14 @@ static const prometheus::Histogram::BucketBoundaries kTpsBuckets = {
     0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 25.0, 50.0, 100.0
 };
 
+static const prometheus::Histogram::BucketBoundaries kSizeBuckets = {
+    0, 64, 256, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304
+};
+
+static const prometheus::Histogram::BucketBoundaries kStreamDurationBuckets = {
+    0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0
+};
+
 static const prometheus::Summary::Quantiles kDefaultQuantiles = {
     {0.5, 0.1},   // median with 10% error
     {0.9, 0.05},  // 90th percentile with 5% error
@@ -57,6 +65,17 @@ void MetricsCollector::init() {
     req_duration_ = &prometheus::BuildHistogram()
         .Name("lemonade_http_request_duration_seconds")
         .Help("HTTP request duration in seconds")
+        .Register(*registry_);
+
+    // Request/response body size histograms
+    req_body_bytes_ = &prometheus::BuildHistogram()
+        .Name("lemonade_request_body_bytes")
+        .Help("HTTP request body size in bytes")
+        .Register(*registry_);
+
+    resp_body_bytes_ = &prometheus::BuildHistogram()
+        .Name("lemonade_response_body_bytes")
+        .Help("HTTP response body size in bytes")
         .Register(*registry_);
 
     // ---- Inference metrics ------------------------------------------------
@@ -123,6 +142,22 @@ void MetricsCollector::init() {
         .Help("Total errors by endpoint and error type")
         .Register(*registry_);
 
+    endpoint_errors_total_ = &prometheus::BuildCounter()
+        .Name("lemonade_endpoint_errors_total")
+        .Help("Errors broken down by endpoint, error type, and model")
+        .Register(*registry_);
+
+    // ---- Streaming metrics ------------------------------------------------
+    stream_chunks_total_ = &prometheus::BuildCounter()
+        .Name("lemonade_stream_chunks_total")
+        .Help("Total streaming chunks sent via SSE")
+        .Register(*registry_);
+
+    stream_duration_ = &prometheus::BuildHistogram()
+        .Name("lemonade_stream_duration_seconds")
+        .Help("Total duration of streaming responses in seconds")
+        .Register(*registry_);
+
     LOG(INFO, "Metrics") << "Prometheus metrics collector initialized" << std::endl;
 }
 
@@ -168,22 +203,38 @@ void MetricsCollector::record_inference_telemetry(const std::string& model,
                                                     int input_tokens,
                                                     int output_tokens,
                                                     double ttft_seconds,
-                                                    double tokens_per_second) {
+                                                    double tokens_per_second,
+                                                    const std::string& backend,
+                                                    const std::string& backend_version) {
     if (!tokens_input_total_ || !tokens_output_total_ || !ttft_summary_ || !tps_histogram_) return;
 
-    // Token counters
-    tokens_input_total_->Add({{"model", model}})
+    // Build label sets — use "unknown" for empty labels so prometheus-cpp doesn't reject them
+    std::string model_label = model.empty() ? "unknown" : model;
+    std::string backend_label = backend.empty() ? "unknown" : backend;
+    std::string version_label = backend_version.empty() ? "unknown" : backend_version;
+
+    // Token counters with backend/version labels
+    tokens_input_total_->Add({{"model", model_label},
+                              {"backend", backend_label},
+                              {"version", version_label}})
         .Increment(static_cast<double>(input_tokens));
-    tokens_output_total_->Add({{"model", model}})
+    tokens_output_total_->Add({{"model", model_label},
+                               {"backend", backend_label},
+                               {"version", version_label}})
         .Increment(static_cast<double>(output_tokens));
 
-    // TTFT summary
-    ttft_summary_->Add({{"model", model}}, kDefaultQuantiles,
+    // TTFT summary with backend/version labels
+    ttft_summary_->Add({{"model", model_label},
+                        {"backend", backend_label},
+                        {"version", version_label}},
+                       kDefaultQuantiles,
                        std::chrono::milliseconds{60000}, 5)
         .Observe(ttft_seconds);
 
-    // Tokens/sec histogram
-    tps_histogram_->Add({{"model", model}}, kTpsBuckets)
+    // Tokens/sec histogram with backend/version labels
+    tps_histogram_->Add({{"model", model_label},
+                         {"backend", backend_label},
+                         {"version", version_label}}, kTpsBuckets)
         .Observe(tokens_per_second);
 }
 
@@ -227,6 +278,57 @@ void MetricsCollector::record_system_resources(double cpu_percent,
         .Set(static_cast<double>(gpu_memory_used_bytes));
     system_memory_used_->Add({{"instance", "localhost"}})
         .Set(static_cast<double>(system_memory_used_bytes));
+}
+
+// ---- New metric helpers ---------------------------------------------------
+
+void MetricsCollector::record_request_size(const std::string& endpoint,
+                                            size_t body_size_bytes) {
+    if (!req_body_bytes_) return;
+    req_body_bytes_->Add({{"endpoint", endpoint}}, kSizeBuckets)
+        .Observe(static_cast<double>(body_size_bytes));
+}
+
+void MetricsCollector::record_response_size(const std::string& endpoint,
+                                              size_t body_size_bytes) {
+    if (!resp_body_bytes_) return;
+    resp_body_bytes_->Add({{"endpoint", endpoint}}, kSizeBuckets)
+        .Observe(static_cast<double>(body_size_bytes));
+}
+
+void MetricsCollector::record_stream_chunk(const std::string& model,
+                                            const std::string& endpoint) {
+    if (!stream_chunks_total_) return;
+    stream_chunks_total_->Add({{"model", model.empty() ? "unknown" : model},
+                               {"endpoint", endpoint}})
+        .Increment();
+}
+
+void MetricsCollector::record_stream_duration(const std::string& model,
+                                                 const std::string& endpoint,
+                                                 double duration_seconds) {
+    if (!stream_duration_) return;
+    stream_duration_->Add({{"model", model.empty() ? "unknown" : model},
+                           {"endpoint", endpoint}}, kStreamDurationBuckets)
+        .Observe(duration_seconds);
+}
+
+void MetricsCollector::record_error(const std::string& endpoint,
+                                     const std::string& error_type,
+                                     const std::string& model) {
+    if (!errors_total_ || !endpoint_errors_total_) return;
+
+    std::string model_label = model.empty() ? "unknown" : model;
+    std::string error_label = error_type.empty() ? "unknown" : error_type;
+
+    errors_total_->Add({{"endpoint", endpoint},
+                        {"error_type", error_label}})
+        .Increment();
+
+    endpoint_errors_total_->Add({{"endpoint", endpoint},
+                                  {"error_type", error_label},
+                                  {"model", model_label}})
+        .Increment();
 }
 
 } // namespace lemon
