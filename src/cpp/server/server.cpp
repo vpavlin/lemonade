@@ -2635,6 +2635,7 @@ void Server::handle_image_upscale(const httplib::Request& req, httplib::Response
 }
 
 void Server::handle_responses(const httplib::Request& req, httplib::Response& res) {
+    auto start = std::chrono::steady_clock::now();
     try {
         auto request_json = nlohmann::json::parse(req.body);
 
@@ -2645,7 +2646,6 @@ void Server::handle_responses(const httplib::Request& req, httplib::Response& re
         MetricsCollector::instance().record_request_size(req.path, req.body.size());
 
         // Start timing for request duration
-        auto start = std::chrono::steady_clock::now();
 
         // Handle model loading/switching using helper function
         if (request_json.contains("model")) {
@@ -2684,7 +2684,7 @@ void Server::handle_responses(const httplib::Request& req, httplib::Response& re
                 // Use cpp-httplib's chunked content provider for SSE streaming
                 res.set_chunked_content_provider(
                     "text/event-stream",
-                    [this, request_body = req.body](size_t offset, httplib::DataSink& sink) {
+                    [this, &req, request_body = req.body](size_t offset, httplib::DataSink& sink) {
                         if (offset > 0) {
                             return false; // Only stream once
                         }
