@@ -1488,6 +1488,26 @@ void Server::handle_chat_completions(const httplib::Request& req, httplib::Respo
                     LOG(INFO, "Telemetry") << "TPS:           " << std::fixed << std::setprecision(2)
                              << tps << std::endl;
                 }
+
+                // Calculate prefill TPS (input_tokens / prompt_ms)
+                double prefill_tps = 0.0;
+                if (timings.contains("prompt_n") && timings.contains("prompt_ms")) {
+                    int prompt_n = timings["prompt_n"].get<int>();
+                    double prompt_ms = timings["prompt_ms"].get<double>();
+                    if (prompt_ms > 0) {
+                        prefill_tps = static_cast<double>(prompt_n) / (prompt_ms / 1000.0);
+                    }
+                }
+
+                // Calculate decode TPS (output_tokens / predicted_ms)
+                double decode_tps = 0.0;
+                if (timings.contains("predicted_n") && timings.contains("predicted_ms")) {
+                    int predicted_n = timings["predicted_n"].get<int>();
+                    double predicted_ms = timings["predicted_ms"].get<double>();
+                    if (predicted_ms > 0) {
+                        decode_tps = static_cast<double>(predicted_n) / (predicted_ms / 1000.0);
+                    }
+                }
                 LOG(INFO, "Telemetry") << "=================" << std::endl;
 
                 // Save telemetry to router
@@ -1506,6 +1526,14 @@ void Server::handle_chat_completions(const httplib::Request& req, httplib::Respo
                 }
                 MetricsCollector::instance().record_inference_telemetry(
                     model_name, input_tokens, output_tokens, ttft_seconds, tps, backend, backend_version);
+
+                // Record split prefill/decode throughput
+                if (prefill_tps > 0) {
+                    MetricsCollector::instance().record_prefill_tps(model_name, prefill_tps, backend, backend_version);
+                }
+                if (decode_tps > 0) {
+                    MetricsCollector::instance().record_decode_tps(model_name, decode_tps, backend, backend_version);
+                }
             } else if (response.contains("usage")) {
                 // OpenAI format uses "usage" field
                 auto usage = response["usage"];
@@ -1535,6 +1563,23 @@ void Server::handle_chat_completions(const httplib::Request& req, httplib::Respo
                     LOG(INFO, "Telemetry") << "TPS:           " << std::fixed << std::setprecision(2)
                              << tps << std::endl;
                 }
+
+                // Calculate prefill/decode TPS from usage.timings if available
+                double prefill_tps = 0.0;
+                double decode_tps = 0.0;
+                if (usage.contains("timings")) {
+                    auto ut = usage["timings"];
+                    if (ut.contains("prompt_n") && ut.contains("prompt_ms")) {
+                        int prompt_n = ut["prompt_n"].get<int>();
+                        double prompt_ms = ut["prompt_ms"].get<double>();
+                        if (prompt_ms > 0) prefill_tps = static_cast<double>(prompt_n) / (prompt_ms / 1000.0);
+                    }
+                    if (ut.contains("predicted_n") && ut.contains("predicted_ms")) {
+                        int predicted_n = ut["predicted_n"].get<int>();
+                        double predicted_ms = ut["predicted_ms"].get<double>();
+                        if (predicted_ms > 0) decode_tps = static_cast<double>(predicted_n) / (predicted_ms / 1000.0);
+                    }
+                }
                 LOG(INFO, "Telemetry") << "=================" << std::endl;
 
                 // Save telemetry to router
@@ -1553,6 +1598,14 @@ void Server::handle_chat_completions(const httplib::Request& req, httplib::Respo
                 }
                 MetricsCollector::instance().record_inference_telemetry(
                     model_name, input_tokens, output_tokens, ttft_seconds, tps, backend, backend_version);
+
+                // Record split prefill/decode throughput
+                if (prefill_tps > 0) {
+                    MetricsCollector::instance().record_prefill_tps(model_name, prefill_tps, backend, backend_version);
+                }
+                if (decode_tps > 0) {
+                    MetricsCollector::instance().record_decode_tps(model_name, decode_tps, backend, backend_version);
+                }
             }
 
             // Capture prompt_tokens from usage if available
@@ -1721,6 +1774,26 @@ void Server::handle_completions(const httplib::Request& req, httplib::Response& 
                     LOG(INFO, "Telemetry") << "TPS:           " << std::fixed << std::setprecision(2)
                              << tps << std::endl;
                 }
+
+                // Calculate prefill TPS (input_tokens / prompt_ms)
+                double prefill_tps = 0.0;
+                if (timings.contains("prompt_n") && timings.contains("prompt_ms")) {
+                    int prompt_n = timings["prompt_n"].get<int>();
+                    double prompt_ms = timings["prompt_ms"].get<double>();
+                    if (prompt_ms > 0) {
+                        prefill_tps = static_cast<double>(prompt_n) / (prompt_ms / 1000.0);
+                    }
+                }
+
+                // Calculate decode TPS (output_tokens / predicted_ms)
+                double decode_tps = 0.0;
+                if (timings.contains("predicted_n") && timings.contains("predicted_ms")) {
+                    int predicted_n = timings["predicted_n"].get<int>();
+                    double predicted_ms = timings["predicted_ms"].get<double>();
+                    if (predicted_ms > 0) {
+                        decode_tps = static_cast<double>(predicted_n) / (predicted_ms / 1000.0);
+                    }
+                }
                 LOG(INFO, "Telemetry") << "=================" << std::endl;
 
                 // Save telemetry to router
@@ -1739,6 +1812,14 @@ void Server::handle_completions(const httplib::Request& req, httplib::Response& 
                 }
                 MetricsCollector::instance().record_inference_telemetry(
                     model_name, input_tokens, output_tokens, ttft_seconds, tps, backend, backend_version);
+
+                // Record split prefill/decode throughput
+                if (prefill_tps > 0) {
+                    MetricsCollector::instance().record_prefill_tps(model_name, prefill_tps, backend, backend_version);
+                }
+                if (decode_tps > 0) {
+                    MetricsCollector::instance().record_decode_tps(model_name, decode_tps, backend, backend_version);
+                }
             } else if (response.contains("usage")) {
                 auto usage = response["usage"];
                 int input_tokens = 0;

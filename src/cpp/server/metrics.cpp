@@ -97,9 +97,9 @@ void MetricsCollector::init() {
         .Help("Total output tokens generated across all models")
         .Register(*registry_);
 
-    ttft_summary_ = &prometheus::BuildSummary()
+    ttft_histogram_ = &prometheus::BuildHistogram()
         .Name("lemonade_time_to_first_token_seconds")
-        .Help("Time to first token in seconds (p50, p90, p99)")
+        .Help("Time to first token in seconds")
         .Register(*registry_);
 
     tps_histogram_ = &prometheus::BuildHistogram()
@@ -222,7 +222,7 @@ void MetricsCollector::record_inference_telemetry(const std::string& model,
                                                     double tokens_per_second,
                                                     const std::string& backend,
                                                     const std::string& backend_version) {
-    if (!tokens_input_total_ || !tokens_output_total_ || !ttft_summary_ || !tps_histogram_) return;
+    if (!tokens_input_total_ || !tokens_output_total_ || !ttft_histogram_ || !tps_histogram_) return;
 
     // Build label sets — use "unknown" for empty labels so prometheus-cpp doesn't reject them
     std::string model_label = model.empty() ? "unknown" : model;
@@ -240,11 +240,9 @@ void MetricsCollector::record_inference_telemetry(const std::string& model,
         .Increment(static_cast<double>(output_tokens));
 
     // TTFT summary with backend/version labels
-    ttft_summary_->Add({{"model", model_label},
-                        {"backend", backend_label},
-                        {"version", version_label}},
-                       kDefaultQuantiles,
-                       std::chrono::milliseconds{60000}, 5)
+    ttft_histogram_->Add({{"model", model_label},
+                          {"backend", backend_label},
+                          {"version", version_label}}, kDefaultHistBuckets)
         .Observe(ttft_seconds);
 
     // Tokens/sec histogram with backend/version labels
@@ -351,6 +349,40 @@ void MetricsCollector::record_version_info(const std::string& version_string) {
     if (!version_info_) return;
     version_info_->Add({{"version", version_string.empty() ? "unknown" : version_string}})
         .Set(1.0);
+}
+
+void MetricsCollector::record_prefill_tps(const std::string& model,
+                                           double tokens_per_second,
+                                           const std::string& backend,
+                                           const std::string& backend_version) {
+    if (!tps_histogram_) return;
+
+    std::string model_label = model.empty() ? "unknown" : model;
+    std::string backend_label = backend.empty() ? "unknown" : backend;
+    std::string version_label = backend_version.empty() ? "unknown" : backend_version;
+
+    tps_histogram_->Add({{"model", model_label},
+                         {"backend", backend_label},
+                         {"phase", "prefill"},
+                         {"version", version_label}}, kTpsBuckets)
+        .Observe(tokens_per_second);
+}
+
+void MetricsCollector::record_decode_tps(const std::string& model,
+                                           double tokens_per_second,
+                                           const std::string& backend,
+                                           const std::string& backend_version) {
+    if (!tps_histogram_) return;
+
+    std::string model_label = model.empty() ? "unknown" : model;
+    std::string backend_label = backend.empty() ? "unknown" : backend;
+    std::string version_label = backend_version.empty() ? "unknown" : backend_version;
+
+    tps_histogram_->Add({{"model", model_label},
+                         {"backend", backend_label},
+                         {"phase", "decode"},
+                         {"version", version_label}}, kTpsBuckets)
+        .Observe(tokens_per_second);
 }
 
 } // namespace lemon

@@ -66,6 +66,18 @@ public:
                                     const std::string& backend = "",
                                     const std::string& backend_version = "");
 
+    /// Record prefill phase throughput (input tokens / prompt_ms)
+    void record_prefill_tps(const std::string& model,
+                            double tokens_per_second,
+                            const std::string& backend = "",
+                            const std::string& backend_version = "");
+
+    /// Record decode phase throughput (output tokens / predicted_ms)
+    void record_decode_tps(const std::string& model,
+                           double tokens_per_second,
+                           const std::string& backend = "",
+                           const std::string& backend_version = "");
+
     /// Record model load/unload event
     void record_model_event(const std::string& model,
                             const std::string& backend,
@@ -131,7 +143,7 @@ private:
     // Inference metrics (with backend/version labels)
     prometheus::Family<prometheus::Counter>* tokens_input_total_ = nullptr;
     prometheus::Family<prometheus::Counter>* tokens_output_total_ = nullptr;
-    prometheus::Family<prometheus::Summary>* ttft_summary_ = nullptr;
+    prometheus::Family<prometheus::Histogram>* ttft_histogram_ = nullptr;
     prometheus::Family<prometheus::Histogram>* tps_histogram_ = nullptr;
 
     // Model lifecycle
