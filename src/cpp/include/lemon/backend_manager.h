@@ -23,6 +23,7 @@ public:
 
     // Query operations
     std::string get_latest_version(const std::string& recipe, const std::string& backend);
+    std::string get_backend_version_from_options(const RecipeOptions& opts);
 
     // List all recipes with their backends and install status
     json get_all_backends_status();

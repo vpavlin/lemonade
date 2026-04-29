@@ -1493,14 +1493,14 @@ void Server::handle_chat_completions(const httplib::Request& req, httplib::Respo
                 // Save telemetry to router
                 router_->update_telemetry(input_tokens, output_tokens, ttft_seconds, tps);
 
-                // Record Prometheus metrics with backend version
+                // Record Prometheus metrics with resolved backend version
                 std::string model_name = router_->get_loaded_model();
                 auto recipe_opts = router_->get_model_recipe_options(model_name);
                 std::string backend = recipe_opts.get_recipe();
                 std::string backend_version = "unknown";
                 try {
                     auto* bm = BackendManager::global();
-                    if (bm) backend_version = bm->get_latest_version(backend, backend);
+                    if (bm) backend_version = bm->get_backend_version_from_options(recipe_opts);
                 } catch (...) {
                     // Silently ignore — version is informational only
                 }
@@ -1540,14 +1540,14 @@ void Server::handle_chat_completions(const httplib::Request& req, httplib::Respo
                 // Save telemetry to router
                 router_->update_telemetry(input_tokens, output_tokens, ttft_seconds, tps);
 
-                // Record Prometheus metrics with backend version
+                // Record Prometheus metrics with resolved backend version
                 std::string model_name = router_->get_loaded_model();
                 auto recipe_opts = router_->get_model_recipe_options(model_name);
                 std::string backend = recipe_opts.get_recipe();
                 std::string backend_version = "unknown";
                 try {
                     auto* bm = BackendManager::global();
-                    if (bm) backend_version = bm->get_latest_version(backend, backend);
+                    if (bm) backend_version = bm->get_backend_version_from_options(recipe_opts);
                 } catch (...) {
                     // Silently ignore — version is informational only
                 }
@@ -1726,14 +1726,14 @@ void Server::handle_completions(const httplib::Request& req, httplib::Response& 
                 // Save telemetry to router
                 router_->update_telemetry(input_tokens, output_tokens, ttft_seconds, tps);
 
-                // Record Prometheus metrics with backend version
+                // Record Prometheus metrics with resolved backend version
                 std::string model_name = router_->get_loaded_model();
                 auto recipe_opts = router_->get_model_recipe_options(model_name);
                 std::string backend = recipe_opts.get_recipe();
                 std::string backend_version = "unknown";
                 try {
                     auto* bm = BackendManager::global();
-                    if (bm) backend_version = bm->get_latest_version(backend, backend);
+                    if (bm) backend_version = bm->get_backend_version_from_options(recipe_opts);
                 } catch (...) {
                     // Silently ignore — version is informational only
                 }
@@ -1767,14 +1767,14 @@ void Server::handle_completions(const httplib::Request& req, httplib::Response& 
                     LOG(INFO, "Telemetry") << "TPS:           " << std::fixed << std::setprecision(2)
                              << tps << std::endl;
 
-                // Record Prometheus metrics with backend version
+                // Record Prometheus metrics with resolved backend version
                 std::string model_name = router_->get_loaded_model();
                 auto recipe_opts = router_->get_model_recipe_options(model_name);
                 std::string backend = recipe_opts.get_recipe();
                 std::string backend_version = "unknown";
                 try {
                     auto* bm = BackendManager::global();
-                    if (bm) backend_version = bm->get_latest_version(backend, backend);
+                    if (bm) backend_version = bm->get_backend_version_from_options(recipe_opts);
                 } catch (...) {
                     // Silently ignore — version is informational only
                 }
@@ -2781,14 +2781,14 @@ void Server::handle_responses(const httplib::Request& req, httplib::Response& re
             // Save telemetry to router
             router_->update_telemetry(input_tokens, output_tokens, ttft_seconds, tps);
 
-            // Record Prometheus metrics with backend version
+            // Record Prometheus metrics with resolved backend version
             std::string model_name = router_->get_loaded_model();
             auto recipe_opts = router_->get_model_recipe_options(model_name);
             std::string backend = recipe_opts.get_recipe();
             std::string backend_version = "unknown";
             try {
                 auto* bm = BackendManager::global();
-                if (bm) backend_version = bm->get_latest_version(backend, backend);
+                if (bm) backend_version = bm->get_backend_version_from_options(recipe_opts);
             } catch (...) {
                 // Silently ignore — version is informational only
             }

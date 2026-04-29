@@ -632,6 +632,40 @@ std::string BackendManager::get_latest_version(const std::string& recipe, const 
     }
 }
 
+// ============================================================================
+// Resolve the actual backend variant from recipe options
+// ============================================================================
+
+std::string BackendManager::get_backend_version_from_options(const RecipeOptions& opts) {
+    std::string recipe = opts.get_recipe();
+    std::string backend_variant;
+
+    // Map from recipe to the option key that holds the backend variant
+    if (recipe == "llamacpp") {
+        backend_variant = opts.get_option("llamacpp_backend").get<std::string>();
+    } else if (recipe == "whispercpp") {
+        backend_variant = opts.get_option("whispercpp_backend").get<std::string>();
+    } else if (recipe == "sd-cpp") {
+        backend_variant = opts.get_option("sd-cpp_backend").get<std::string>();
+    }
+
+    // Resolve empty / auto to the default backend
+    if (backend_variant.empty() || backend_variant == "auto") {
+        auto backends = SystemInfo::get_supported_backends(recipe);
+        backend_variant = backends.backends.empty() ? "" : backends.backends[0];
+    }
+
+    // Look up the version from backend_versions.json using the resolved variant
+    try {
+        if (!backend_variant.empty()) {
+            return get_version_from_config(recipe, normalize_backend_name(recipe, backend_variant));
+        }
+    } catch (...) {
+        // Fall through to return empty string
+    }
+    return "";
+}
+
 json BackendManager::get_all_backends_status() {
     auto statuses = SystemInfo::get_all_recipe_statuses();
     json result = json::array();
