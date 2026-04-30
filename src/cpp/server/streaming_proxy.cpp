@@ -59,6 +59,12 @@ void StreamingProxy::forward_sse_stream(
 
         LOG(INFO, "Server") << "Streaming completed - 200 OK" << std::endl;
 
+        // Debug: dump the tail of the buffer to see what parse_telemetry sees
+        {
+            std::string tail = telemetry_buffer.substr(std::max((size_t)0, telemetry_buffer.size()-800));
+            LOG(INFO, "Telemetry") << "Buffer size=" << telemetry_buffer.size() << " tail=[" << tail << "]" << std::endl;
+        }
+
         // Parse telemetry from buffered data
         auto telemetry = parse_telemetry(telemetry_buffer);
         LOG(INFO, "Telemetry") << "Streaming proxy telemetry: input=" << telemetry.input_tokens
