@@ -32,6 +32,13 @@ void StreamingProxy::forward_sse_stream(
                 return false; // Client disconnected
             }
 
+            // Debug: log first 200 chars of each chunk for inspection
+            static int chunk_count = 0;
+            if (chunk_count++ < 3) {
+                LOG(INFO, "Telemetry") << "Chunk " << chunk_count << " len=" << length << " preview=[" 
+                    << chunk.substr(0, std::min((size_t)200, chunk.size())) << "]" << std::endl;
+            }
+
             // Try to parse telemetry from this SSE data chunk
             size_t dpos = chunk.find("data: ");
             if (dpos != std::string::npos) {
