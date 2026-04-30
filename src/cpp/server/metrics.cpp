@@ -16,12 +16,14 @@ namespace lemon {
 // ---------------------------------------------------------------------------
 // Helper: default bucket boundaries and quantiles
 // ---------------------------------------------------------------------------
+// TTFT buckets: sub-second to multi-second range with meaningful breakpoints
 static const prometheus::Histogram::BucketBoundaries kDefaultHistBuckets = {
-    0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0
+    0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0
 };
 
+// TPS buckets: cover slow streaming decode (1-5 tok/s) up to fast prefill (200+ tok/s)
 static const prometheus::Histogram::BucketBoundaries kTpsBuckets = {
-    0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 25.0, 50.0, 100.0
+    1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 200.0, 500.0
 };
 
 static const prometheus::Histogram::BucketBoundaries kSizeBuckets = {
