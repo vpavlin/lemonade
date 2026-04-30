@@ -12,18 +12,15 @@ void StreamingProxy::forward_sse_stream(
     std::function<void(const TelemetryData&)> on_complete,
     long timeout_seconds) {
 
-    std::string telemetry_buffer;
     bool stream_error = false;
     bool has_done_marker = false;
+    TelemetryData telemetry;
 
     // Use HttpClient to stream from backend
     auto result = utils::HttpClient::post_stream(
         backend_url,
         request_body,
-        [&sink, &telemetry_buffer, &has_done_marker](const char* data, size_t length) {
-            // Buffer for telemetry parsing
-            telemetry_buffer.append(data, length);
-
+        [&sink, &has_done_marker, &telemetry](const char* data, size_t length) {
             // Check if this chunk contains [DONE]
             std::string chunk(data, length);
             if (chunk.find("[DONE]") != std::string::npos) {
@@ -33,6 +30,44 @@ void StreamingProxy::forward_sse_stream(
             // Forward chunk to client immediately
             if (!sink.write(data, length)) {
                 return false; // Client disconnected
+            }
+
+            // Try to parse telemetry from this SSE data chunk
+            size_t dpos = chunk.find("data: ");
+            if (dpos != std::string::npos) {
+                size_t json_start = dpos + 6;
+                if (json_start < chunk.size()) {
+                    std::string json_str = chunk.substr(json_start);
+                    // Trim trailing whitespace/newlines/carriage returns
+                    while (!json_str.empty() && (json_str.back() == '\n' || json_str.back() == '\r')) {
+                        json_str.pop_back();
+                    }
+                    if (!json_str.empty() && json_str != "[DONE]") {
+                        try {
+                            auto chunk_json = json::parse(json_str);
+                            // Check for timings in the chunk (llama.cpp sends this in the final SSE event)
+                            if (chunk_json.contains("timings")) {
+                                auto timings = chunk_json["timings"];
+                                telemetry.input_tokens = timings.value("prompt_n", 0);
+                                telemetry.output_tokens = timings.value("predicted_n", 0);
+                                if (timings.contains("prompt_ms")) {
+                                    telemetry.time_to_first_token = timings["prompt_ms"].get<double>() / 1000.0;
+                                }
+                                if (timings.contains("predicted_per_second")) {
+                                    telemetry.tokens_per_second = timings["predicted_per_second"].get<double>();
+                                }
+                            }
+                            // Also check for usage field (OpenAI format)
+                            if (chunk_json.contains("usage")) {
+                                auto usage = chunk_json["usage"];
+                                telemetry.input_tokens = usage.value("prompt_tokens", 0);
+                                telemetry.output_tokens = usage.value("completion_tokens", 0);
+                            }
+                        } catch (...) {
+                            // Not valid JSON, skip
+                        }
+                    }
+                }
             }
 
             return true; // Continue streaming
@@ -58,18 +93,6 @@ void StreamingProxy::forward_sse_stream(
         sink.done();
 
         LOG(INFO, "Server") << "Streaming completed - 200 OK" << std::endl;
-
-        // Debug: dump the tail of the buffer to see what parse_telemetry sees
-        {
-            std::string tail = telemetry_buffer.substr(std::max((size_t)0, telemetry_buffer.size()-800));
-            LOG(INFO, "Telemetry") << "Buffer size=" << telemetry_buffer.size() << " tail=[" << tail << "]" << std::endl;
-        }
-
-        // Parse telemetry from buffered data
-        auto telemetry = parse_telemetry(telemetry_buffer);
-        LOG(INFO, "Telemetry") << "Streaming proxy telemetry: input=" << telemetry.input_tokens
-            << " output=" << telemetry.output_tokens << " ttft=" << telemetry.time_to_first_token
-            << " tps=" << telemetry.tokens_per_second << std::endl;
 
         if (on_complete) {
             on_complete(telemetry);
