@@ -61,7 +61,9 @@ void StreamingProxy::forward_sse_stream(
 
         // Parse telemetry from buffered data
         auto telemetry = parse_telemetry(telemetry_buffer);
-        telemetry.print();
+        LOG(INFO, "Telemetry") << "Streaming proxy telemetry: input=" << telemetry.input_tokens
+            << " output=" << telemetry.output_tokens << " ttft=" << telemetry.time_to_first_token
+            << " tps=" << telemetry.tokens_per_second << std::endl;
 
         if (on_complete) {
             on_complete(telemetry);
