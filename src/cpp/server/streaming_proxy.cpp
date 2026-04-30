@@ -52,6 +52,10 @@ void StreamingProxy::forward_sse_stream(
                     if (!json_str.empty() && json_str != "[DONE]") {
                         try {
                             auto chunk_json = json::parse(json_str);
+                            // Debug: log every chunk that has timings or usage
+                            if (chunk_json.contains("timings") || chunk_json.contains("usage")) {
+                                LOG(INFO, "Telemetry") << "Found timings/usage in chunk: " << json_str.substr(0, std::min((size_t)300, json_str.size())) << std::endl;
+                            }
                             // Check for timings in the chunk (llama.cpp sends this in the final SSE event)
                             if (chunk_json.contains("timings")) {
                                 auto timings = chunk_json["timings"];
